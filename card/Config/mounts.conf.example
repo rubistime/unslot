@@ -1,0 +1,32 @@
+# Optional bind mounts. Uncomment only after checking files and destinations.
+# ROM mappings verified on RG SP TF2. Keep original ROM directories unchanged.
+ROM|nes|NES
+ROM|SFC|SNES
+ROM|MS|SMS
+ROM|THIRTYTWOX|32X
+ROM|POKE|POKEMINI
+ROM|GB|GB
+ROM|GBC|GBC
+ROM|GBA|GBA
+ROM|NDS|NDS
+ROM|MD|MD
+ROM|GG|GG
+ROM|PS|PS
+ROM|PCE|PCE
+ROM|PCECD|PCECD
+ROM|SEGACD|SEGACD
+ROM|ARCADE|ARCADE
+ROM|CPS1|CPS1
+ROM|CPS2|CPS2
+ROM|CPS3|CPS3
+ROM|NEOGEO|NEOGEO
+ROM|LYNX|LYNX
+ROM|WS|WS
+ROM|FDS|FDS
+ROM|PC98|PC98
+ROM|PICO8|PICO8
+ROM|MSX|MSX
+# SAVE mounts must be enabled deliberately, and only AFTER testing save format.
+# SAVE|Snes9x|SNES
+# SAVE|FCEUmm|NES
+# SAVE|mGBA|GBA

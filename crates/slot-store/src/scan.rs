@@ -76,9 +76,12 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
         &read(crate::LABELS_SHELL_FILE),
     );
     let mut carts = Vec::new();
+    let recursive = read("Config/recursive_rom_scan.txt")
+        .trim()
+        .eq_ignore_ascii_case("true");
     for platform in Platform::ALL {
         let dir = root.join("Games").join(platform.dir_name());
-        let entries = match std::fs::read_dir(&dir) {
+        let entries = match discover_roms(&dir, platform, recursive) {
             Ok(d) => d,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => {
@@ -89,22 +92,8 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
         let labels_dir = root.join("Labels").join(platform.dir_name());
         let labels = listing(&labels_dir);
         let first = carts.len();
-        for entry in entries {
-            let Ok(entry) = entry else {
-                continue;
-            };
-            let rom = entry.path();
+        for rom in entries {
             let arcade = platform.spec().header == Header::Arcade;
-            // A disc set kept in its own folder, as Redump's are, is the disc named after the
-            // folder. Not for arcade, where a folder beside a romset holds that romset's disks.
-            let rom = match !arcade && !is_hidden(&rom) && is_dir(&entry) {
-                true => match disc_in(&rom, platform) {
-                    Some(disc) => disc,
-                    None => continue,
-                },
-                false if is_hidden(&rom) || !platform.accepts(&rom) || !is_file(&entry) => continue,
-                false => rom,
-            };
             let Some(stem) = rom.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
@@ -142,6 +131,48 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
     Ok(carts)
 }
 
+/// Discover the normal top-level files plus, when opted in, ROMs in category folders.
+/// Disc directories stay atomic; arcade CHD directories are never treated as categories.
+/// Do not follow symlinks; cap depth to avoid pathological directory trees.
+fn discover_roms(dir: &Path, platform: Platform, recursive: bool) -> std::io::Result<Vec<PathBuf>> {
+    fn visit(dir: &Path, platform: Platform, recursive: bool, depth: usize,
+             out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if is_hidden(&path) { continue; }
+            let ty = entry.file_type()?;
+            if ty.is_symlink() { continue; }
+            if ty.is_file() {
+                if platform.accepts(&path) { out.push(path); }
+                continue;
+            }
+            if !ty.is_dir() { continue; }
+            let arcade = platform.spec().header == Header::Arcade;
+            if !arcade {
+                if let Some(disc) = disc_in(&path, platform) {
+                    out.push(disc);
+                    continue;
+                }
+            } else {
+                // A directory containing CHD images belongs to an arcade romset.
+                // It is not a category folder; leave its CHDs alongside the parent zip.
+                let chd_dir = std::fs::read_dir(&path)?
+                    .filter_map(Result::ok)
+                    .any(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("chd")));
+                if chd_dir { continue; }
+            }
+            if recursive && depth < 8 {
+                visit(&path, platform, recursive, depth + 1, out)?;
+            }
+        }
+        Ok(())
+    }
+    let mut found = Vec::new();
+    visit(dir, platform, recursive, 0, &mut found)?;
+    Ok(found)
+}
+
 /// The discs the shelf's `.m3u` playlists name. A multi-disc game is shown once, as its playlist,
 /// not once a disc.
 fn in_playlists(carts: &[Cart]) -> Vec<PathBuf> {
@@ -176,14 +207,6 @@ pub fn listing(dir: &Path) -> HashMap<String, String> {
         .collect()
 }
 
-fn is_dir(entry: &std::fs::DirEntry) -> bool {
-    match entry.file_type() {
-        Ok(t) if t.is_symlink() => entry.path().is_dir(),
-        Ok(t) => t.is_dir(),
-        Err(_) => false,
-    }
-}
-
 /// The disc in `dir` named after it, in the order the platform lists its extensions.
 fn disc_in(dir: &Path, platform: Platform) -> Option<PathBuf> {
     let name = dir.file_name()?.to_str()?;
@@ -192,14 +215,6 @@ fn disc_in(dir: &Path, platform: Platform) -> Option<PathBuf> {
         .iter()
         .map(|ext| dir.join(format!("{name}.{ext}")))
         .find(|p| p.is_file())
-}
-
-fn is_file(entry: &std::fs::DirEntry) -> bool {
-    match entry.file_type() {
-        Ok(t) if t.is_symlink() => entry.path().is_file(),
-        Ok(t) => t.is_file(),
-        Err(_) => false,
-    }
 }
 
 pub fn sort_key(stem: &str) -> (u8, String) {
@@ -229,4 +244,26 @@ pub fn is_hidden(p: &Path) -> bool {
     p.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.starts_with('.'))
+}
+
+#[cfg(test)]
+mod custom_scan_tests {
+    use super::*;
+    #[test]
+    fn nested_roms_require_opt_in() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().join("GBA");
+        std::fs::create_dir_all(base.join("RPG")).unwrap();
+        std::fs::write(base.join("RPG/Pokemon.gba"), b"rom").unwrap();
+        std::fs::write(base.join("RPG/thumbnail.png"), b"png").unwrap();
+        assert!(discover_roms(&base, Platform::Gba, false).unwrap().is_empty());
+        let entries = discover_roms(&base, Platform::Gba, true).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].ends_with("RPG/Pokemon.gba"));
+    }
+    #[test]
+    fn missing_directory_returns_error() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(discover_roms(&temp.path().join("not-found"), Platform::Gba, true).is_err());
+    }
 }
