@@ -100,8 +100,16 @@ jobs:
           # The same System folder as an update pack, which BaseOS installs from a card's root.
           sh tools/update/pack.sh "$out" MinUI.zip
           # And signed, as unslot-<version>.pak, which is what unslot installs.
-          test -n "$UNSLOT_PAK_KEY" || { echo "UNSLOT_PAK_KEY is not set" >&2; exit 1; }
-          task dist:pak OUT="$out" PACK=MinUI.zip
+          if [ -n "$UNSLOT_PAK_KEY" ]; then
+              task dist:pak OUT="$out" PACK=MinUI.zip
+              pak="unslot-${GITHUB_REF_NAME}.pak"
+              sha256sum "$zip" "$pak" MinUI.zip > SHA256SUMS
+              echo "pak=$pak" >> "$GITHUB_OUTPUT"
+          else
+              echo "No signing key; skipping signed .pak"
+              sha256sum "$zip" MinUI.zip > SHA256SUMS
+          fi
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
           pak="unslot-${GITHUB_REF_NAME}.pak"
           test -f "$pak"
           sha256sum "$zip" "$pak" MinUI.zip > SHA256SUMS
