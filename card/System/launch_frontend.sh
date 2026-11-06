@@ -93,6 +93,11 @@ if [ -f "$SD/.unslot-port" ]; then
 	fi
 fi
 
+# Optional per-device bind mounts must be present before ROM discovery and saves.
+if [ -f "$SYS/mounts.sh" ]; then
+    sh "$SYS/mounts.sh" --apply >> "$LOGS/mounts.log" 2>&1
+fi
+
 [ -f "$LOGS/slot.log" ] && mv -f "$LOGS/slot.log" "$LOGS/slot.log.1"
 log "exec $SYS/slot"
 
